@@ -1,0 +1,196 @@
+# sample 100 times a second
+SAMPLE_TIME=0.01 
+# 20th of a second
+FILTER_TIME_CONSTANT=0.05 
+# Judging thigh range when walking
+WALK_ANGLE_THRESHOLD_UP = 0.5
+WALK_ANGLE_THRESHOLD_DOWN = 0.2
+WALK_GZ_THRESHOLD=0.7
+# Judging thigh range when running
+RUN_ANGLE_THRESHOLD_UP = 0.7
+RUN_ANGLE_THRESHOLD_DOWN = 0 
+RUN_GZ_THRESHOLD=1.0
+# Judging if the gyroscope is deliberately jittery
+GYRO_SHAKE_THRESHOLD=1.5
+# Judging starjump
+STARJUMP_ANGLE_THRESHOLD_UP=2.0
+STARJUMP_ANGLE_THRESHOLD_DOWN=-2.0
+STARJUMP_AY_THRESHOLD=12.0
+STARJUMP_AMAG_THRESHOLD=15.0
+# Judging whether to turn
+GYRO_TURN_THRESHOLD = 2.0
+ANGLE_TURN_THRESHOLD=2.5
+TURN_YZ_ANGLE_UP=2.5
+TURN_YZ_ANGLE_DOWN=1.5
+# import the relate packages
+import time,graphs,sensors,filters,speech,math
+# Use the double ended queue from python collections to store a history buffer
+from collections import deque
+# History 10 data
+HISTORY_LEN=10
+gx_history=deque(maxlen=HISTORY_LEN)
+gy_history=deque(maxlen=HISTORY_LEN)
+gz_history=deque(maxlen=HISTORY_LEN)
+# Initialise the values for each type of movement
+run=0
+run_last_threshold=0
+walk=0
+walk_last_threshold=0
+starjump=0
+starjump_last_threshold=0
+turn=0
+turn_last_threshold=0
+walk_threshold=0
+run_threshold=0
+turn_threshold=0
+starjump_threshold=0
+yz_up=0
+# don't fire an event until at least MIN_TIME_BETWEEN_EVENTS samples have been taken
+MIN_TIME_BETWEEN_EVENTS=10
+time_since_last_turn=MIN_TIME_BETWEEN_EVENTS
+time_since_last_walk=MIN_TIME_BETWEEN_EVENTS
+time_since_last_run=MIN_TIME_BETWEEN_EVENTS
+time_since_last_starjump=MIN_TIME_BETWEEN_EVENTS
+# Draw the walk and run graphs
+graphs.set_style("WALK_ANGLE_THRESHOLD_UP","rgb(255,0,0)",-math.pi,math.pi,subgraph_x=0,subgraph_y=0)
+graphs.set_style("WALK_ANGLE_THRESHOLD_DOWN","rgb(255,0,0)",-math.pi,math.pi,subgraph_x=0,subgraph_y=0)
+graphs.set_style("WALK_GZ_THRESHOLD","rgb(0,255,255)",-math.pi,math.pi,subgraph_x=0,subgraph_y=0)
+graphs.set_style("axy_angle","rgb(0,0,0)",-math.pi,math.pi,subgraph_x=0,subgraph_y=0)
+graphs.set_style("gz","rgb(255,255,50)",-math.pi,math.pi,subgraph_x=0,subgraph_y=0)
+graphs.set_style("RUN_GZ_THRESHOLD","rgb(0,0,255)",-math.pi,math.pi,subgraph_x=0,subgraph_y=0)
+graphs.set_style("RUN_ANGLE_THRESHOLD_UP","rgb(0,255,0)",-math.pi,math.pi,subgraph_x=0,subgraph_y=0)
+graphs.set_style("RUN_ANGLE_THRESHOLD_DOWN","rgb(0,255,0)",-math.pi,math.pi,subgraph_x=0,subgraph_y=0)
+# Draw turn
+graphs.set_style("GYRO_TURN_THRESHOLD","rgb(255,0,0)",-10,10,subgraph_x=0,subgraph_y=1)
+graphs.set_style("TURN_YZ_ANGLE_UP","rgb(0,255,0)",-10,10,subgraph_x=0,subgraph_y=1)
+graphs.set_style("TURN_YZ_ANGLE_DOWN","rgb(0,255,0)",-10,10,subgraph_x=0,subgraph_y=1)
+graphs.set_style("ayz_angle","rgb(0,0,0)",-10,10,subgraph_x=0,subgraph_y=1)
+graphs.set_style("gy","rgb(0,0,255)",-10,10,subgraph_x=0,subgraph_y=1)
+# Draw star-jump
+graphs.set_style("STARJUMP_ANGLE_THRESHOLD_UP","rgb(255,0,0)",-10,10,subgraph_x=1,subgraph_y=0)
+graphs.set_style("STARJUMP_ANGLE_THRESHOLD_DOWN","rgb(255,0,0)",-10,10,subgraph_x=1,subgraph_y=0)
+graphs.set_style("STARJUMP_AY_THRESHOLD","rgb(0,255,0)",-10,10,subgraph_x=1,subgraph_y=0)
+graphs.set_style("STARJUMP_AMAG_THRESHOLD","rgb(0,255,255)",-10,10,subgraph_x=1,subgraph_y=0)
+graphs.set_style("ay_highpassed","rgb(0,0,0)",-10,10,subgraph_x=1,subgraph_y=0)
+graphs.set_style("amag_highpassed","rgb(0,0,255)",-10,10,subgraph_x=1,subgraph_y=0)
+graphs.set_style("ayz_angle","rgb(255,0,255)",-10,10,subgraph_x=1,subgraph_y=0)
+# Draw the each movement threshold graph
+graphs.set_style("walk_threshold","rgb(0,0,0)",0,1,subgraph_x=1,subgraph_y=1)
+graphs.set_style("run_threshold","rgb(255,0,0)",0,1,subgraph_x=1,subgraph_y=1)
+graphs.set_style("turn_threshold","rgb(0,0,255)",0,1,subgraph_x=1,subgraph_y=1)
+graphs.set_style("starjump_threshold","rgb(255,0,255)",0,1,subgraph_x=1,subgraph_y=1)
+# Output
+print("ax","ay","ay_highpassed","az","amag","amag_highpassed","gx","gy","gz","axy_angle","ayz_angle","axz_angle",
+"WALK_ANGLE_THRESHOLD_UP","WALK_ANGLE_THRESHOLD_DOWN","RUN_ANGLE_THRESHOLD_UP","RUN_ANGLE_THRESHOLD_DOWN","WALK_GZ_THRESHOLD",
+"RUN_GZ_THRESHOLD","STARJUMP_ANGLE_THRESHOLD_UP","STARJUMP_ANGLE_THRESHOLD_DOWN","STARJUMP_AY_THRESHOLD","STARJUMP_AMAG_THRESHOLD",
+"GYRO_TURN_THRESHOLD","ANGLE_TURN_THRESHOLD","TURN_YZ_ANGLE_UP","TURN_YZ_ANGLE_DOWN","walk","run","turn","starjump",sep=",")
+# High-pass filtering
+hpFilter=filters.HighPassFilter.make_from_time_constant(FILTER_TIME_CONSTANT,SAMPLE_TIME)
+# startup delay 
+time.sleep(1.0) 
+speech.say("Start")
+while True:
+    if sensors.replayer.has_replay():
+        ax,ay,az,amag,gx,gy,gz = sensors.replayer.get_level("ax","ay","az","amag","gx","gy","gz") 
+    else: 
+        # get xyz values of acceleration
+        (ax,ay,az)=sensors.accel.get_xyz()
+        amag=sensors.accel.get_magnitude()
+        # get xyz values of gyroscope
+        (gx,gy,gz)=sensors.gyro.get_xyz()
+    # Direction of acceleration
+    axy_angle=math.atan2(ax,ay)
+    ayz_angle=math.atan2(ay,az)
+    axz_angle=math.atan2(ax,az)
+    # High-pass filter to reject gravity interference 
+    amag_highpassed=hpFilter.on_value(amag) 
+    ax_highpassed=hpFilter.on_value(ax)
+    ay_highpassed=hpFilter.on_value(ay)
+    az_highpassed=hpFilter.on_value(az)
+    gx_history.append(gx)
+    gy_history.append(gy)
+    gz_history.append(gz)
+    gx_mean=sum(gx_history)/len(gx_history)
+    gy_mean=sum(gy_history)/len(gy_history)
+    gz_mean=sum(gz_history)/len(gz_history)
+    # Walk
+    if axy_angle>WALK_ANGLE_THRESHOLD_UP and abs(gz_mean)>WALK_GZ_THRESHOLD and axy_angle<RUN_ANGLE_THRESHOLD_UP and abs(gx_mean)<GYRO_SHAKE_THRESHOLD and abs(gy_mean)<GYRO_SHAKE_THRESHOLD:
+        walk_threshold=1
+    elif axy_angle<WALK_ANGLE_THRESHOLD_DOWN:
+        walk_threshold=0
+    time_since_last_walk+=1
+    # Run   
+    if axy_angle>RUN_ANGLE_THRESHOLD_UP and abs(gz_mean)>RUN_GZ_THRESHOLD and abs(gx_mean)<GYRO_SHAKE_THRESHOLD and abs(gy_mean)<GYRO_SHAKE_THRESHOLD :
+        run_threshold=1
+    elif axy_angle<RUN_ANGLE_THRESHOLD_DOWN:
+        run_threshold=0
+    time_since_last_run+=1
+    # Star-jump
+    if ayz_angle<STARJUMP_ANGLE_THRESHOLD_DOWN:
+        yz_up=0
+    elif ayz_angle>STARJUMP_ANGLE_THRESHOLD_UP:
+        yz_up=1
+    if yz_up==1 and ay_highpassed>STARJUMP_AY_THRESHOLD and amag_highpassed>STARJUMP_AMAG_THRESHOLD and gy_mean<GYRO_SHAKE_THRESHOLD and gz_mean<GYRO_SHAKE_THRESHOLD:
+        starjump_threshold=1
+    else:
+        starjump_threshold=0
+    time_since_last_starjump+=1
+    # Turn
+    if (axz_angle>ANGLE_TURN_THRESHOLD or axz_angle<-ANGLE_TURN_THRESHOLD) and abs(gy_mean)>GYRO_TURN_THRESHOLD and abs(gx_mean)<GYRO_SHAKE_THRESHOLD and abs(gz_mean)<GYRO_SHAKE_THRESHOLD and ayz_angle<TURN_YZ_ANGLE_UP and ayz_angle>TURN_YZ_ANGLE_DOWN:
+        turn_threshold=1
+    else:
+        turn_threshold=0
+    time_since_last_turn+=1
+    # Fire event 
+    if (walk_last_threshold==0 and walk_threshold==1):
+        if time_since_last_walk>=MIN_TIME_BETWEEN_EVENTS:
+            time_since_last_walk=0
+            speech.say("walk")
+            walk+=1
+    elif (run_last_threshold==0 and run_threshold==1):
+        if time_since_last_run>=MIN_TIME_BETWEEN_EVENTS:
+            time_since_last_run=0
+            speech.say("run")
+            run+=1
+    elif (starjump_last_threshold==0 and starjump_threshold==1):
+        if time_since_last_starjump>=MIN_TIME_BETWEEN_EVENTS:
+            time_since_last_starjump=0
+            speech.say("star jump")
+            starjump+=1
+    elif (turn_last_threshold==0 and turn_threshold==1):
+        if time_since_last_turn>=MIN_TIME_BETWEEN_EVENTS:
+            time_since_last_turn=0
+            speech.say("turn")
+            turn+=1
+    walk_last_threshold=walk_threshold
+    run_last_threshold=run_threshold
+    turn_last_threshold=turn_threshold
+    statjump_last_thrshold = starjump_threshold
+    print(ax,ay,ay_highpassed,az,amag,amag_highpassed,gx,gy,gz,axy_angle,ayz_angle,axz_angle,
+    WALK_ANGLE_THRESHOLD_UP,WALK_ANGLE_THRESHOLD_DOWN,RUN_ANGLE_THRESHOLD_UP,RUN_ANGLE_THRESHOLD_DOWN,WALK_GZ_THRESHOLD,
+    RUN_GZ_THRESHOLD,STARJUMP_ANGLE_THRESHOLD_UP,STARJUMP_ANGLE_THRESHOLD_DOWN,STARJUMP_AY_THRESHOLD,STARJUMP_AMAG_THRESHOLD,
+    GYRO_TURN_THRESHOLD,ANGLE_TURN_THRESHOLD,TURN_YZ_ANGLE_UP,TURN_YZ_ANGLE_DOWN,walk,run,turn,starjump,sep=",")
+    graphs.on_value("WALK_ANGLE_THRESHOLD_UP",WALK_ANGLE_THRESHOLD_UP)
+    graphs.on_value("WALK_ANGLE_THRESHOLD_DOWN",WALK_ANGLE_THRESHOLD_DOWN)
+    graphs.on_value("WALK_GZ_THRESHOLD",axy_angle)
+    graphs.on_value("axy_angle",axy_angle)
+    graphs.on_value("RUN_GZ_THRESHOLD",axy_angle)
+    graphs.on_value("gz",gz)
+    graphs.on_value("RUN_ANGLE_THRESHOLD_UP",RUN_ANGLE_THRESHOLD_UP)
+    graphs.on_value("RUN_ANGLE_THRESHOLD_DOWN",RUN_ANGLE_THRESHOLD_DOWN)
+    graphs.on_value("GYRO_TURN_THRESHOLD",GYRO_TURN_THRESHOLD)
+    graphs.on_value("TURN_YZ_ANGLE_UP",TURN_YZ_ANGLE_UP)
+    graphs.on_value("TURN_YZ_ANGLE_DOWN",TURN_YZ_ANGLE_DOWN)
+    graphs.on_value("gy",gy)
+    graphs.on_value("STARJUMP_ANGLE_THRESHOLD_UP",STARJUMP_ANGLE_THRESHOLD_UP)
+    graphs.on_value("STARJUMP_ANGLE_THRESHOLD_DOWN",STARJUMP_ANGLE_THRESHOLD_DOWN)
+    graphs.on_value("STARJUMP_AY_THRESHOLD",STARJUMP_AY_THRESHOLD)
+    graphs.on_value("STARJUMP_AMAG_THRESHOLD",STARJUMP_AMAG_THRESHOLD)
+    graphs.on_value("amag_highpassed",amag_highpassed)
+    graphs.on_value("ayz_angle",ayz_angle)
+    graphs.on_value("ay_highpassed",ay_highpassed)
+    graphs.on_value("walk_threshold",walk_threshold)
+    graphs.on_value("run_threshold",run_threshold)
+    graphs.on_value("starjump_threshold",starjump_threshold)
+    graphs.on_value("turn_threshold",turn_threshold)
+    time.sleep(SAMPLE_TIME)
